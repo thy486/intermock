@@ -1,17 +1,17 @@
-# [Fock from here](https://travis-ci.org/google/intermock)
+# [Fock from google/intermock](https://travis-ci.org/google/intermock)
 
-# intermock [![Build Status](https://api.travis-ci.org/google/intermock.svg?branch=master)](https://travis-ci.org/google/intermock)
+# typemock
 Mocking library to create mock objects and JSON for TypeScript interfaces via Faker.
 
 **This is not an officially supported Google product.**
 
 ## Installation
 ```
-npm install intermock
+npm install typemock
 ```
 
 ## CLI
-Intermock exposes a CLI, **which is the recommended way to use the tool**. The following subsections show an example file, command, and output to demonstrate using the CLI.
+Yypemock exposes a CLI, **which is the recommended way to use the tool**. The following subsections show an example file, command, and output to demonstrate using the CLI.
 
 ### Example file
 ```typescript
@@ -44,7 +44,7 @@ interface SchoolRecord {
 
 ### Example command
 ```bash
-node ./node_modules/intermock/build/src/cli/index.js --files ./example-file.ts --interfaces "Admin"
+node ./node_modules/typemock/build/src/cli/index.js --files ./example-file.ts --interfaces "Admin"
 ```
 
 ### Example output

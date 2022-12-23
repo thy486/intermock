@@ -8,12 +8,22 @@ node_modules/
 npm-shrinkwrap.json
 
 # codes
+src/
 test/
+build/test
+bin/test
 
+.clang-format
 .gitignore
 .editorconfig
 tslint.json
+tsconfig.json
+mocha-config.json
+.travis.yml
+index.ts
 
 npm-debug.log
 docs/
-webpack.config.js
+webpack.common.js
+webpack.dev.js
+webpack.prod.js
