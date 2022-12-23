@@ -32,3 +32,7 @@ bin/src/
 .DS_Store
 
 docs/dist/build/**/*
+
+# build
+build
+bin
