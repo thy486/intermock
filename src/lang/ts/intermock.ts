@@ -396,6 +396,14 @@ function processJsDocs(
   const tagValue = extractTagValue(tag);
 
   switch (tag.tagName.text) {
+    case 'examples':
+      try {
+        const parseValue = JSON.parse(tagValue);
+        if (Array.isArray(parseValue)) {
+          output[property] = parseValue[randomRange(0, parseValue.length - 1)];
+        }
+      } catch(_) {}
+      break;
     case 'mockType':
       const mock = generatePrimitive(property, node.kind, options, tagValue);
       output[property] = mock;
@@ -622,7 +630,7 @@ function processUnionPropertyType(
   }
 }
 
-const SUPPORTED_JSDOC_TAGNAMES = ['mockType', 'mockRange'] as const;
+const SUPPORTED_JSDOC_TAGNAMES = ['mockType', 'mockRange', 'examples'] as const;
 type SupportedJsDocTagName = typeof SUPPORTED_JSDOC_TAGNAMES[number];
 
 
