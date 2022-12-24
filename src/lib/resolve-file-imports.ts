@@ -60,7 +60,7 @@ export function setImportExportSpecifier(
       const dependencyMap = new Map<string, string>();
 
       const fileContent = readFileSync(path, 'utf8').toString().trim();
-      const importMatch = /import ([\s\S]+?) from ['"]([\s\S]+?)['"]/gm;
+      const importMatch = /import ([\s\S]+?) from ['"](.+?)['"]/gm;
 
       Array.from(fileContent.matchAll(importMatch)).map((item) => {
         const imports = item[1].replace(/[{}\s]/gm, '').split(',');
@@ -98,33 +98,52 @@ export function setImportExportSpecifier(
     throw new Error(`not supported import ${moduleFrom} in ${curFile}`);
   };
 
-  const interfaceRoot = findInterfaceRoot(typeName, options.files![0][0]);
+  let interfaceRoot: string | undefined;
 
-  const makeOutput = (fileRootPath: string) => {
-    return (mock({
-      ...options,
-      interfaces: [typeName],
-      files: [[fileRootPath, readFileSync(fileRootPath, 'utf-8')]],
-      output: 'object',
-    }) as Output)[typeName];
-  };
-
-  output[property] = makeOutput(interfaceRoot);
-
-  // cannot get interface because of code which like `export xxx from 'xxx'`;
-  if (output[property] === void 0) {
-    const exportMatch = /export \* from ['"]([\s\S]+?)['"]/gm;
-    const fileContent = readFileSync(interfaceRoot, 'utf-8');
-    const exports = fileContent.matchAll(exportMatch);
-    let iter = exports.next();
-    while (!iter.done) {
-      const exportFilepath = resolveModuleFrom(interfaceRoot, iter.value[1]);
-      output[property] = makeOutput(exportFilepath);
-      // got
-      if (output[property] !== void 0) {
-        break;
-      }
-      iter = exports.next();
+  const namespaceTypeMatch = typeName.match(/^([\w$]+)\.([\w$]+$)/);
+  if (!namespaceTypeMatch) {
+    interfaceRoot = findInterfaceRoot(typeName, options.files![0][0]);
+  }
+  else {
+    const fileContent = readFileSync(options.files![0][0], 'utf-8');
+    const namespaceImportMatch = new RegExp(`import \\* as ${namespaceTypeMatch[1]} from ['"](.+?)['"]`, 'm');
+    const pathMatch = fileContent.match(namespaceImportMatch);
+    if (pathMatch) {
+      typeName = namespaceTypeMatch[2];
+      interfaceRoot = findInterfaceRoot(typeName, resolveModuleFrom(options.files![0][0], pathMatch[1]));
     }
+  }
+
+  if (interfaceRoot) {
+    const makeOutput = (fileRootPath: string) => {
+      return (mock({
+        ...options,
+        interfaces: [typeName],
+        files: [[fileRootPath, readFileSync(fileRootPath, 'utf-8')]],
+        output: 'object',
+      }) as Output)[typeName];
+    };
+  
+    output[property] = makeOutput(interfaceRoot);
+  
+    // cannot get interface because of code which like `export xxx from 'xxx'`;
+    if (output[property] === void 0) {
+      const exportMatch = /export \* from ['"](.+?)['"]/gm;
+      const fileContent = readFileSync(interfaceRoot, 'utf-8');
+      const exports = fileContent.matchAll(exportMatch);
+      let iter = exports.next();
+      while (!iter.done) {
+        const exportFilepath = resolveModuleFrom(interfaceRoot, iter.value[1]);
+        output[property] = makeOutput(exportFilepath);
+        // got
+        if (output[property] !== void 0) {
+          break;
+        }
+        iter = exports.next();
+      }
+    }
+  }
+  else {
+    output[property] = {};
   }
 }
