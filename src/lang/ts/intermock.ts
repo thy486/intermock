@@ -142,13 +142,33 @@ function getLiteralTypeValue(node: ts.LiteralTypeNode) {
  */
 function processGenericPropertyType(
   node: ts.PropertySignature, output: Output, property: string,
-  kind: ts.SyntaxKind, mockType: string, options: Options) {
-  if (node && node.type && ts.isLiteralTypeNode(node.type)) {
-    output[property] = getLiteralTypeValue(node.type as ts.LiteralTypeNode);
-    return;
+  kind: ts.SyntaxKind, mockType: string, sourceFile: ts.SourceFile, options: Options, types: Types) {
+  if (node && node.type) {
+    if (ts.isLiteralTypeNode(node.type)) {
+      output[property] = getLiteralTypeValue(node.type as ts.LiteralTypeNode);
+      return;
+    }
+    if (ts.isTypeLiteralNode(node.type)) {
+      processTypeLiteralPropertyType(node.type as ts.TypeLiteralNode, output, property, sourceFile, options, types);
+      return;
+    }
   }
   const mock = generatePrimitive(property, kind, options, mockType);
   output[property] = mock;
+}
+
+function processTypeLiteralPropertyType(
+  node: ts.TypeLiteralNode, output: Output, property: string,
+  sourceFile: ts.SourceFile, options: Options, types: Types
+) {
+  const ret: Output = {};
+  // TODO get range from JSDoc
+  // TODO given a range of interfaces to generate, add to array. If 1
+  // then just return an object
+  node.forEachChild(
+    child =>
+      traverseInterfaceMembers(child, ret, sourceFile, options, types));
+  output[property] = ret;
 }
 
 /**
