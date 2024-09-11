@@ -134,7 +134,7 @@ export function setImportExportSpecifier(
       let iter = exports.next();
       while (!iter.done) {
         const exportFilepath = resolveModuleFrom(interfaceRoot, iter.value[1]);
-        output[property] = makeOutput(exportFilepath);
+        output[property] = makeOutput(findInterfaceRoot(typeName, exportFilepath));
         // got
         if (output[property] !== void 0) {
           break;
