@@ -22,11 +22,13 @@ export const supportedPrimitiveTypes: {[key: string]: boolean} = {
   [ts.SyntaxKind.BooleanKeyword]: true,
   [ts.SyntaxKind.ObjectKeyword]: true,
   [ts.SyntaxKind.AnyKeyword]: true,
+  [ts.SyntaxKind.UndefinedKeyword]: true,
+  [ts.SyntaxKind.NullKeyword]: true,
 };
 
 /* tslint:disable */
 export const defaultTypeToMock: {
-  [index: number]: (isFixedMode: boolean) => string | number | boolean | object
+  [index: number]: (isFixedMode: boolean) => any
 } = {
   [ts.SyntaxKind.NumberKeyword]: (isFixedMode = false) =>
       parseInt(fake('number.int', isFixedMode) as string, 10),
@@ -38,5 +40,7 @@ export const defaultTypeToMock: {
     return {}
   },
   [ts.SyntaxKind.AnyKeyword]: (isFixedMode = false) => '',
+  [ts.SyntaxKind.UndefinedKeyword]: (isFixedMode = false) => undefined,
+  [ts.SyntaxKind.NullKeyword]: (isFixedMode = false) => null,
 };
 /* tslint:enable */
