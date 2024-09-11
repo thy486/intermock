@@ -64,6 +64,7 @@ type TypeCacheRecord = {
 
 export type Output = Record<string | number, {}>;
 export type Types = Record<string, TypeCacheRecord>;
+export type Scoped = Record<string, ts.TypeNode>;
 
 /**
  * Generate fake data using faker for primitive types: string|number|boolean.
@@ -149,7 +150,7 @@ function getLiteralTypeValue(node: ts.LiteralTypeNode) {
  */
 function processGenericPropertyType(
   node: ts.PropertySignature, output: Output, property: string,
-  kind: ts.SyntaxKind, mockType: string, sourceFile: ts.SourceFile, options: Options, types: Types) {
+  kind: ts.SyntaxKind, mockType: string, sourceFile: ts.SourceFile, options: Options, types: Types, scoped: Scoped) {
   if (node && node.type) {
     if (ts.isLiteralTypeNode(node.type)) {
       const ret = getLiteralTypeValue(node.type as ts.LiteralTypeNode);
@@ -159,7 +160,7 @@ function processGenericPropertyType(
       return;
     }
     if (ts.isTypeLiteralNode(node.type)) {
-      processTypeLiteralPropertyType(node.type as ts.TypeLiteralNode, output, property, sourceFile, options, types);
+      processTypeLiteralPropertyType(node.type as ts.TypeLiteralNode, output, property, sourceFile, options, types, scoped);
       return;
     }
   }
@@ -169,7 +170,7 @@ function processGenericPropertyType(
 
 function processTypeLiteralPropertyType(
   node: ts.TypeLiteralNode, output: Output, property: string,
-  sourceFile: ts.SourceFile, options: Options, types: Types
+  sourceFile: ts.SourceFile, options: Options, types: Types, scoped: Scoped
 ) {
   const ret: Output = {};
   // TODO get range from JSDoc
@@ -177,7 +178,7 @@ function processTypeLiteralPropertyType(
   // then just return an object
   node.forEachChild(
     child =>
-      traverseInterfaceMembers(child, ret, sourceFile, options, types));
+      traverseInterfaceMembers(child, ret, sourceFile, options, types, scoped));
   output[property] = ret;
 }
 
@@ -195,7 +196,7 @@ function processTypeLiteralPropertyType(
  */
 function processFunctionPropertyType(
   node: ts.PropertySignature | ts.TypeNode, output: Output, property: string,
-  sourceFile: ts.SourceFile, options: Options, types: Types) {
+  sourceFile: ts.SourceFile, options: Options, types: Types, scoped: Scoped) {
   // TODO process args from parameters of function
   const args = '';
   let body = '';
@@ -210,7 +211,7 @@ function processFunctionPropertyType(
       processPropertyTypeReference(
         node, tempBody, 'body',
         ((returnType as ts.TypeReferenceNode).typeName as ts.Identifier).text,
-        returnType.kind, sourceFile, options, types);
+        returnType.kind, sourceFile, options, types, scoped);
 
       body = `return ${stringify(tempBody['body'])}`;
       break;
@@ -277,7 +278,8 @@ function processIndexedAccessPropertyType(
 function processPropertyTypeReference(
   node: ts.PropertySignature | ts.TypeNode, output: Output, property: string,
   typeName: string, kind: ts.SyntaxKind, sourceFile: ts.SourceFile,
-  options: Options, types: Types) {
+  options: Options, types: Types, scoped: Scoped) {
+
   let normalizedTypeName: string;
   let isArray = false;
 
@@ -311,15 +313,28 @@ function processPropertyTypeReference(
   if (normalizedTypeName !== typeName && isArray) {
     processArrayPropertyType(
       node, output, property, normalizedTypeName, kind, sourceFile, options,
-      types);
+      types, scoped);
     return;
   }
 
-  if (!types[normalizedTypeName]) {
+  if (!types[normalizedTypeName] && !scoped[normalizedTypeName]) {
     throw new Error(`Type '${normalizedTypeName}' is not specified in the provided files but is required for property: '${property}'. Please include it.`);
   }
 
-  switch ((types[normalizedTypeName] as TypeCacheRecord).kind) {
+  let nextScopeTypes = types;
+  let recordNode = types[normalizedTypeName];
+  let isScopeNode = false;
+  if (scoped[normalizedTypeName]) {
+    nextScopeTypes = {
+      ...nextScopeTypes
+    };
+    gatherTypesNode(nextScopeTypes, scoped[normalizedTypeName]);
+    recordNode = nextScopeTypes[normalizedTypeName];
+    isScopeNode = true;
+  }
+  types = nextScopeTypes;
+
+  switch (recordNode.kind) {
     case ts.SyntaxKind.EnumDeclaration:
       setEnum(sourceFile, output, types, normalizedTypeName, property);
       break;
@@ -337,7 +352,7 @@ function processPropertyTypeReference(
       }
       break;
     default:
-      const record = (types[normalizedTypeName] as TypeCacheRecord);
+      const record = recordNode;
       if (record.kind !== record.aliasedTo) {
         const alias = record.aliasedTo;
         const isPrimitiveType = alias === ts.SyntaxKind.StringKeyword ||
@@ -386,7 +401,7 @@ function processPropertyTypeReference(
             };
             processUnionPropertyType(
               record.node as ts.PropertySignature, output, property, typeName,
-              record.kind, sourceFile, options, types);
+              record.kind, sourceFile, options, types, scoped);
           }
         } else if (alias === ts.SyntaxKind.TypeLiteral) {
           output[property] = {};
@@ -394,6 +409,9 @@ function processPropertyTypeReference(
         } else {
           // TODO
         }
+      } else if (isScopeNode) {
+        output[property] = {};
+        processNode(recordNode.node, sourceFile, output[property], options, types, false, typeName);
       } else {
         output[property] = {};
         processFile(sourceFile, output[property], options, types, typeName);
@@ -466,17 +484,17 @@ function normalizeNamespaceTypeName(typeName: string) {
 function processArrayPropertyType(
   node: ts.PropertySignature | ts.TypeNode, output: Output, property: string,
   typeName: string, kind: ts.SyntaxKind, sourceFile: ts.SourceFile,
-  options: Options, types: Types) {
+  options: Options, types: Types, scoped: Scoped) {
   typeName = typeName.replace('[', '').replace(']', '');
   typeName = normalizeNamespaceTypeName(typeName);
   output[property] = resolveArrayType(
-    node, property, typeName, kind, sourceFile, options, types);
+    node, property, typeName, kind, sourceFile, options, types, scoped);
 }
 
 function resolveArrayType(
   node: ts.PropertySignature | ts.TypeNode, property: string, typeName: string,
   kind: ts.SyntaxKind, sourceFile: ts.SourceFile, options: Options,
-  types: Types) {
+  types: Types, scoped: Scoped) {
   typeName = typeName.replace('[', '').replace(']', '');
   const result: any[] = [];
 
@@ -504,7 +522,7 @@ function resolveArrayType(
     setter = (index) => {
       processPropertyTypeReference(
         node, result as any, index as any, typeName, kind as ts.SyntaxKind, sourceFile,
-        options, types);
+        options, types, scoped);
     };
   } else {
     setter = (index) => {
@@ -534,14 +552,14 @@ function resolveArrayType(
  */
 function processTuplePropertyType(
   node: ts.TupleTypeNode, output: Output, property: string,
-  sourceFile: ts.SourceFile, options: Options, types: Types) {
+  sourceFile: ts.SourceFile, options: Options, types: Types, scoped: Scoped) {
   output[property] =
-    resolveTuplePropertyType(node, property, sourceFile, options, types);
+    resolveTuplePropertyType(node, property, sourceFile, options, types, scoped);
 }
 
 function resolveTuplePropertyType(
   node: ts.TupleTypeNode, property: string, sourceFile: ts.SourceFile,
-  options: Options, types: Types): Array<unknown> {
+  options: Options, types: Types, scoped: Scoped): Array<unknown> {
   const result = [];
   const { elements: elementTypes } = node;
 
@@ -552,7 +570,7 @@ function resolveTuplePropertyType(
         const node = (typeNode as ts.RestTypeNode).type as ts.ArrayTypeNode;
         result.push(...resolveArrayType(
           node.elementType, property, node.getText(), node.elementType.kind,
-          sourceFile, options, types));
+          sourceFile, options, types, scoped));
         break;
       case ts.SyntaxKind.NumberKeyword:
       case ts.SyntaxKind.StringKeyword:
@@ -565,7 +583,7 @@ function resolveTuplePropertyType(
       case ts.SyntaxKind.TupleType:
         result.push(resolveTuplePropertyType(
           typeNode as ts.TupleTypeNode, property, sourceFile, options,
-          types));
+          types, scoped));
         break;
       default:
         const data = {};
@@ -595,7 +613,7 @@ function resolveTuplePropertyType(
 function processUnionPropertyType(
   node: ts.PropertySignature, output: Output, property: string,
   typeName: string, kind: ts.SyntaxKind, sourceFile: ts.SourceFile,
-  options: Options, types: Types) {
+  options: Options, types: Types, scoped: Scoped) {
   const unionNodes = node && node.type ?
     (node.type as ts.UnionTypeNode).types as ts.NodeArray<ts.TypeNode> :
     [];
@@ -625,7 +643,7 @@ function processUnionPropertyType(
       processPropertyTypeReference(
         typeReferenceNode, output, property,
         (typeReferenceNode.typeName as ts.Identifier).text,
-        typeReferenceNode.kind, sourceFile, options, types);
+        typeReferenceNode.kind, sourceFile, options, types, scoped);
       return;
     }
     const arrayNode =
@@ -638,14 +656,14 @@ function processUnionPropertyType(
         `[${((arrayNode.elementType as ts.TypeReferenceNode).typeName as
           ts.Identifier)
           .text}]`,
-        arrayNode.kind, sourceFile, options, types);
+        arrayNode.kind, sourceFile, options, types, scoped);
       return;
     }
     const functionNode = unionNodes.find(
       (node: ts.Node) => node.kind === ts.SyntaxKind.FunctionType);
     if (functionNode) {
       processFunctionPropertyType(
-        functionNode, output, property, sourceFile, options, types);
+        functionNode, output, property, sourceFile, options, types, scoped);
       return;
     }
     const indexedAccessNode = unionNodes.find(
@@ -748,7 +766,7 @@ function isAnyJsDocs(jsDocs: ts.JSDoc[]) {
  */
 function traverseInterfaceMembers(
   node: ts.Node, output: Output, sourceFile: ts.SourceFile, options: Options,
-  types: Types) {
+  types: Types, scoped: Scoped) {
   if (node.kind !== ts.SyntaxKind.PropertySignature) {
     return;
   }
@@ -793,26 +811,26 @@ function traverseInterfaceMembers(
       case ts.SyntaxKind.TypeReference:
         processPropertyTypeReference(
           node, output, property, typeName, kind as ts.SyntaxKind, sourceFile,
-          options, types);
+          options, types, scoped);
         break;
       case ts.SyntaxKind.UnionType:
         processUnionPropertyType(
           node, output, property, typeName, kind as ts.SyntaxKind, sourceFile,
-          options, types);
+          options, types, scoped);
         break;
       case ts.SyntaxKind.TupleType:
         processTuplePropertyType(
           node.type as ts.TupleTypeNode, output, property, sourceFile,
-          options, types);
+          options, types, scoped);
         break;
       case ts.SyntaxKind.ArrayType:
         processArrayPropertyType(
           node, output, property, typeName, kind as ts.SyntaxKind, sourceFile,
-          options, types);
+          options, types, scoped);
         break;
       case ts.SyntaxKind.FunctionType:
         processFunctionPropertyType(
-          node, output, property, sourceFile, options, types);
+          node, output, property, sourceFile, options, types, scoped);
         break;
       case ts.SyntaxKind.IndexedAccessType:
         processIndexedAccessPropertyType(
@@ -821,7 +839,7 @@ function traverseInterfaceMembers(
         break;
       default:
         processGenericPropertyType(
-          node, output, property, kind as ts.SyntaxKind, '', sourceFile, options, types);
+          node, output, property, kind as ts.SyntaxKind, '', sourceFile, options, types, scoped);
         break;
     }
   };
@@ -867,6 +885,71 @@ function setEnum(
   }
 }
 
+function createNodeGenericParameterReferenceBind<T extends ts.TypeNode>(
+    node: T,
+    genericParameterNode: ts.TypeParameterDeclaration,
+    genericsResolvedNodes: ReadonlyArray<ts.TypeNode> = [],
+): T {
+    if (ts.isInterfaceDeclaration(node) || ts.isTypeAliasDeclaration(node)) {
+        const genericsNodeMap = (node.typeParameters ?? []).reduce<Record<string, ts.TypeNode>>((ret, cur, index) => {
+            const replaceNode = genericsResolvedNodes[index] ?? cur.default!;
+            ret[cur.name.text] = replaceNode;
+            return ret;
+        }, {});
+        if (ts.isInterfaceDeclaration(node)) {
+            const newMembers: ts.TypeElement[] = [];
+            for (let len = node.members.length, i = 0; i < len; i++) {
+                const member = node.members[i];
+                if (ts.isPropertySignature(member) && member.type) {
+                    if (ts.isTypeReferenceNode(member.type)) {
+                        if (
+                            member.type.typeName &&
+                            ts.isIdentifier(member.type.typeName) &&
+                            member.type.typeName.text in genericsNodeMap
+                        ) {
+                            const newMember: ts.PropertySignature = {
+                                ...member,
+                                type: genericsNodeMap[member.type.typeName.text],
+                            };
+                            newMembers.push(newMember);
+                            continue;
+                        }
+                    }
+                    newMembers.push(member);
+                }
+            }
+            const retNode: ts.InterfaceDeclaration = {
+                ...node,
+                name: genericParameterNode.name,
+                parent: genericParameterNode.parent,
+                members: Object.assign(newMembers, {
+                    pos: node.members.pos,
+                    end: node.members.end,
+                    hasTrailingComma: node.members.hasTrailingComma,
+                }),
+            };
+            if (node.typeParameters) {
+                (retNode as any).typeParameters = createNodeArray([], node.typeParameters);
+            }
+            return retNode as unknown as T;
+        } else {
+        }
+    }
+    return {
+      ...node,
+      name: genericParameterNode.name,
+      parent: genericParameterNode.parent,
+    };
+}
+
+function createNodeArray<T extends ts.Node>(newArray: T[], originNodeArray: ts.NodeArray<T>, clone = false): ts.NodeArray<T> {
+  let ret = clone ? [...newArray] : newArray;
+  return Object.assign(ret, {
+    pos: originNodeArray.pos,
+    end: originNodeArray.end,
+    hasTrailingComma: originNodeArray.hasTrailingComma
+  });
+}
 
 
 /**
@@ -883,7 +966,7 @@ function setEnum(
  */
 function traverseInterface(
   node: ts.Node, output: Output, sourceFile: ts.SourceFile, options: Options,
-  types: Types, propToTraverse?: string, path?: string) {
+  types: Types, propToTraverse?: string, path?: string, scoped: Scoped = {}) {
   if (path) {
     output[path] = {};
     output = output[path];
@@ -900,7 +983,6 @@ function traverseInterface(
   if (heritageClauses) {
     heritageClauses.forEach((clause) => {
       const extensionTypes = clause.types;
-
       extensionTypes.forEach(extensionTypeNode => {
         const extensionType = extensionTypeNode.expression.getText();
 
@@ -910,19 +992,35 @@ function traverseInterface(
         }
 
         const extensionNode = types[extensionType].node;
-        let extensionOutput: Output = {};
-        if (options.importsResolver && extensionNode.kind === ts.SyntaxKind.ImportSpecifier) {
+        const extensionOutput: Output = {};
+        if (options.importsResolver && ts.isImportSpecifier(extensionNode)) {
           options.importsResolver(
             sourceFile, extensionOutput, types, extensionType, extensionType, options
-          )
+          );
         }
-        else {
-          traverseInterface(
-            extensionNode, extensionOutput, sourceFile, options, types,
-            propToTraverse, path);
+
+        if (ts.isExpressionWithTypeArguments(extensionTypeNode)) {
+          (extensionTypeNode.typeArguments ?? []).forEach((genericsNodeReference) => {
+            if (ts.isTypeReferenceNode(genericsNodeReference)) {
+              const name = genericsNodeReference.typeName.getText();
+              const referenceNode = types[name];
+              if (ts.isInterfaceDeclaration(extensionNode) || ts.isTypeAliasDeclaration(extensionNode)) {
+                (extensionNode.typeParameters ?? []).forEach(node => {
+                  scoped[node.name.text] = createNodeGenericParameterReferenceBind(
+                    referenceNode.node as ts.TypeNode,
+                    node,
+                    genericsNodeReference.typeArguments
+                  );
+                })
+              }
+            }
+          });
         }
-        extensionOutput = extensionOutput[extensionType];
-        extensions.push(extensionOutput);
+
+        traverseInterface(
+          extensionNode, extensionOutput, sourceFile, options, types,
+          propToTraverse, path, scoped);
+        extensions.push(extensionOutput[extensionType]);
       });
     });
 
@@ -936,9 +1034,8 @@ function traverseInterface(
   // TODO get range from JSDoc
   // TODO given a range of interfaces to generate, add to array. If 1
   // then just return an object
-  node.forEachChild(
-    child =>
-      traverseInterfaceMembers(child, output, sourceFile, options, types));
+  ts.forEachChild(node, child =>
+    traverseInterfaceMembers(child, output, sourceFile, options, types, scoped));
 }
 
 function isSpecificInterface(name: string, options: Options) {
@@ -966,7 +1063,14 @@ function isSpecificInterface(name: string, options: Options) {
 function processFile(
   sourceFile: ts.SourceFile, output: Output, options: Options, types: Types,
   propToTraverse?: string) {
-  const processNode = (node: ts.Node) => {
+    processNode(sourceFile, sourceFile, output, options, types, true, propToTraverse);
+}
+
+function processNode(
+  node: ts.Node, sourceFile: ts.SourceFile, output: Output, options: Options,
+  types: Types, specific?: boolean, propToTraverse?: string
+): void {
+  const processInnerNode = (node: ts.Node) => {
     switch (node.kind) {
       case ts.SyntaxKind.InterfaceDeclaration:
         /**
@@ -974,10 +1078,10 @@ function processFile(
          * clauses
          */
         const p = (node as ts.InterfaceDeclaration).name.text;
-        if (!isSpecificInterface(p, options) && !propToTraverse) {
+        if (specific && (!isSpecificInterface(p, options) && !propToTraverse)) {
           return;
         }
-
+  
         if (propToTraverse) {
           if (p === propToTraverse) {
             traverseInterface(
@@ -990,11 +1094,11 @@ function processFile(
       case ts.SyntaxKind.TypeAliasDeclaration:
         const type = (node as ts.TypeAliasDeclaration).type;
         const path = (node as ts.TypeAliasDeclaration).name.text;
-
-        if (!isSpecificInterface(path, options)) {
+  
+        if (specific && (!isSpecificInterface(path, options))) {
           return;
         }
-
+  
         if (propToTraverse) {
           if (path === propToTraverse) {
             traverseInterface(
@@ -1005,15 +1109,15 @@ function processFile(
             type, output, sourceFile, options, types, undefined, path);
         }
         break;
-
+  
       default:
         break;
     }
 
-    ts.forEachChild(node, processNode);
-  };
+    ts.forEachChild(node, processInnerNode);
+  }
 
-  processNode(sourceFile);
+  processInnerNode(node);
 }
 
 /**
@@ -1040,18 +1144,7 @@ function gatherTypes(sourceFile: ts.SourceFile | ts.ModuleBlock) {
       return;
     }
 
-    let aliasedTo;
-
-    if ((node as ts.TypeAliasDeclaration).type) {
-      aliasedTo = (node as ts.TypeAliasDeclaration).type.kind;
-    } else {
-      aliasedTo = node.kind;
-    }
-
-    if (modulePrefix) {
-      types[`${modulePrefix}.${text}`] = { kind: node.kind, aliasedTo, node };
-    }
-    types[text] = { kind: node.kind, aliasedTo, node };
+    gatherTypesNode(types, node, modulePrefix);
 
     ts.forEachChild(node, processNode);
   };
@@ -1060,6 +1153,26 @@ function gatherTypes(sourceFile: ts.SourceFile | ts.ModuleBlock) {
   processNode(sourceFile);
 
   return types;
+}
+
+function gatherTypesNode(
+    types: Types,
+    node: ts.Node | ts.ModuleBlock,
+    modulePrefix = '',
+): void {
+    const name = (node as ts.DeclarationStatement).name;
+    const text = name?.text ?? '';
+    let aliasedTo: ts.SyntaxKind;
+    if ((node as ts.TypeAliasDeclaration).type) {
+        aliasedTo = (node as ts.TypeAliasDeclaration).type.kind;
+    } else {
+        aliasedTo = node.kind;
+    }
+
+    if (modulePrefix) {
+        types[`${modulePrefix}.${text}`] = { kind: node.kind, aliasedTo, node };
+    }
+    types[text] = { kind: node.kind, aliasedTo, node };
 }
 
 /**
