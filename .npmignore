@@ -10,6 +10,7 @@ npm-shrinkwrap.json
 # codes
 src/
 test/
+examples/
 build/test
 bin/test
 

@@ -261,14 +261,23 @@ function processPropertyTypeReference(
 
   const typeReference: ts.NodeWithTypeArguments | undefined =
     (node as ts.MappedTypeNode).type;
-  if (!isArray && typeReference && typeReference.typeArguments &&
-    typeReference.typeArguments.length) {
+  if (!isArray) {
+    const nodeType = (typeReference as ts.TypeReferenceNode).typeName;
     // console.log('generic');
     // Process Generic
-    const nodeType = ((typeReference as ts.TypeReferenceNode).typeName as ts.Identifier)
-    .escapedText as string;
-    if (nodeType !== 'Array') {
-      normalizedTypeName = nodeType;
+    if (typeReference && typeReference.typeArguments &&
+      typeReference.typeArguments.length) {
+      const nodeTypeName = (nodeType as ts.Identifier).escapedText as string;
+      if (nodeTypeName !== 'Array') {
+        normalizedTypeName = nodeTypeName;
+      }
+    } else {
+      switch (nodeType.kind) {
+        // C.xxxx
+        case ts.SyntaxKind.QualifiedName:
+          normalizedTypeName = (nodeType.left as ts.Identifier).escapedText as string;
+          break;
+      }
     }
   }
 
@@ -287,6 +296,12 @@ function processPropertyTypeReference(
   switch ((types[normalizedTypeName] as TypeCacheRecord).kind) {
     case ts.SyntaxKind.EnumDeclaration:
       setEnum(sourceFile, output, types, normalizedTypeName, property);
+      break;
+    case ts.SyntaxKind.NamespaceImport:
+      if (options.importsResolver) {
+        options.importsResolver(
+          sourceFile, output, types, typeName, property, options);
+      }
       break;
     case ts.SyntaxKind.ImportSpecifier:
     case ts.SyntaxKind.ExportSpecifier:
