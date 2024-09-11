@@ -33,6 +33,6 @@ export const smartProps: {[index: string]: string} = {
   companyName: 'company.companyName',
   date: 'date.past',
   endDate: 'date.future',
-  id: 'random.uuid',
-  oid: 'random.uuid',
+  id: 'datatype.uuid',
+  oid: 'datatype.uuid',
 };

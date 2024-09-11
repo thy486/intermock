@@ -1,3 +1,5 @@
+# [Fock from here](https://travis-ci.org/google/intermock)
+
 # intermock [![Build Status](https://api.travis-ci.org/google/intermock.svg?branch=master)](https://travis-ci.org/google/intermock)
 Mocking library to create mock objects and JSON for TypeScript interfaces via Faker.
 
@@ -115,7 +117,7 @@ The following TypeScript features are supported:
 - Functions (stringified output!)
 - Optional properties
 - Type imports
-- Specific [Faker](https://github.com/marak/Faker.js/#api-methods) data types (via JSDoc comment)
+- Specific [Faker](https://github.com/faker-js/faker/#-modules) data types (via JSDoc comment)
   ```ts
   interface Host {
     /** @mockType {internet.ipv6} */
