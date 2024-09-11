@@ -116,19 +116,26 @@ function isQuestionToken(
 
 function getLiteralTypeValue(node: ts.LiteralTypeNode) {
   const { literal } = node;
-  // Boolean Literal
-  if (literal.kind === ts.SyntaxKind.TrueKeyword) {
-    return true;
-  } else if (literal.kind === ts.SyntaxKind.FalseKeyword) {
-    return false;
+  switch (literal.kind) {
+    case ts.SyntaxKind.TrueKeyword:
+      return true;
+    case ts.SyntaxKind.FalseKeyword:
+      return false;
+    case ts.SyntaxKind.NullKeyword:
+      return null;
     // String Literal
-  } else if (literal.kind === ts.SyntaxKind.StringLiteral) {
-    return literal.text ? literal.text : '';
+    case ts.SyntaxKind.StringLiteral:
+      return literal.text ? literal.text : '';
     // Numeric Literal
-  } else {
-    // The text IS a string, but the output value has to be a numeric value
-    return Number((literal as ts.NumericLiteral).text);
+    case ts.SyntaxKind.NumericLiteral:
+      return Number((literal as ts.NumericLiteral).text);
   }
+  // The text IS a string, but the output value has to be a numeric value
+  const tryNumber = Number((literal as ts.NumericLiteral).text);
+  if (Number.isNaN(tryNumber)) {
+    throw new Error(`Unsupported Literal type ${literal.kind}`)
+  }
+  return tryNumber;
 }
 
 /**
@@ -145,7 +152,10 @@ function processGenericPropertyType(
   kind: ts.SyntaxKind, mockType: string, sourceFile: ts.SourceFile, options: Options, types: Types) {
   if (node && node.type) {
     if (ts.isLiteralTypeNode(node.type)) {
-      output[property] = getLiteralTypeValue(node.type as ts.LiteralTypeNode);
+      const ret = getLiteralTypeValue(node.type as ts.LiteralTypeNode);
+      if (ret != null) {
+        output[property] = ret;
+      }
       return;
     }
     if (ts.isTypeLiteralNode(node.type)) {
@@ -279,24 +289,20 @@ function processPropertyTypeReference(
     normalizedTypeName = typeName;
   }
 
-  const typeReference: ts.NodeWithTypeArguments | undefined =
-    (node as ts.MappedTypeNode).type;
-  if (!isArray) {
-    const nodeType = (typeReference as ts.TypeReferenceNode).typeName;
-    // console.log('generic');
-    // Process Generic
-    if (typeReference && typeReference.typeArguments &&
-      typeReference.typeArguments.length) {
-      const nodeTypeName = (nodeType as ts.Identifier).escapedText as string;
-      if (nodeTypeName !== 'Array') {
+  let tryMappedTypeNode = node as ts.MappedTypeNode | undefined;
+  if (!isArray && !types[normalizedTypeName] && tryMappedTypeNode?.type && ts.isTypeReferenceNode(tryMappedTypeNode.type)) {
+    let typeNameNode = tryMappedTypeNode.type.typeName;
+    if (ts.isIdentifier(typeNameNode)) {
+      const nodeTypeName = typeNameNode.escapedText;
+      if (nodeTypeName !== 'Array' && typeof nodeTypeName === 'string') {
         normalizedTypeName = nodeTypeName;
       }
     } else {
-      switch (nodeType.kind) {
-        // C.xxxx
-        case ts.SyntaxKind.QualifiedName:
-          normalizedTypeName = (nodeType.left as ts.Identifier).escapedText as string;
-          break;
+      const typeNameNodeLeft = typeNameNode.left;
+      if (ts.isIdentifier(typeNameNodeLeft)) {
+        if (typeof typeNameNodeLeft.escapedText === 'string') {
+          normalizedTypeName = typeNameNodeLeft.escapedText;
+        }
       }
     }
   }
@@ -373,8 +379,11 @@ function processPropertyTypeReference(
                   return t;
                 });
             ((record.node as ts.TypeAliasDeclaration).type as
-              ts.UnionOrIntersectionTypeNode)
-              .types = updatedArr as unknown as ts.NodeArray<ts.TypeNode>;
+            ts.UnionOrIntersectionTypeNode) = {
+              ...(record.node as ts.TypeAliasDeclaration).type as
+              ts.UnionOrIntersectionTypeNode,
+              types: updatedArr as unknown as ts.NodeArray<ts.TypeNode>
+            };
             processUnionPropertyType(
               record.node as ts.PropertySignature, output, property, typeName,
               record.kind, sourceFile, options, types);
@@ -534,7 +543,7 @@ function resolveTuplePropertyType(
   node: ts.TupleTypeNode, property: string, sourceFile: ts.SourceFile,
   options: Options, types: Types): Array<unknown> {
   const result = [];
-  const { elementTypes } = node;
+  const { elements: elementTypes } = node;
 
   for (let i = 0; i < elementTypes.length; i++) {
     const typeNode = elementTypes[i];
@@ -597,6 +606,17 @@ function processUnionPropertyType(
       generatePrimitive(property, supportedType.kind, options, '');
     return;
   } else {
+    // check has null literalTypeNode
+    for (const typeNode of unionNodes) {
+      if (ts.isLiteralTypeNode(typeNode) && typeNode.literal.kind === ts.SyntaxKind.NullKeyword) {
+        if (options.isFixedMode) {
+          return;
+        }
+        if (Math.random() > 0.5) {
+          return;
+        }
+      }
+    }
     const typeReferenceNode =
       unionNodes.find(node => node.kind === ts.SyntaxKind.TypeReference) as
       ts.TypeReferenceNode |
@@ -641,8 +661,10 @@ function processUnionPropertyType(
     if (literalNode) {
       const literalIndex =
         options.isFixedMode ? 0 : randomRange(0, unionNodes.length - 1);
-      output[property] =
-        getLiteralTypeValue(unionNodes[literalIndex] as ts.LiteralTypeNode);
+      const ret = getLiteralTypeValue(unionNodes[literalIndex] as ts.LiteralTypeNode);
+      if (ret != null) {
+        output[property] = ret;
+      }
       return;
     }
 
@@ -660,14 +682,27 @@ type SupportedJsDocTagName = typeof SUPPORTED_JSDOC_TAGNAMES[number];
  * @param tag processed tag
  */
 function extractTagValue(tag: ts.JSDocTag): string {
-  let value = tag.comment || '';
-
-  // Unwrap from braces
-  if (value[0] === '{' && value[value.length - 1] === '}') {
-    value = value.slice(1, -1);
+  if (!tag.comment) {
+    return '';
   }
+  if (typeof tag.comment === 'string') {
+    let value = tag.comment || '';
 
-  return value;
+    // Unwrap from braces
+    if (value[0] === '{' && value[value.length - 1] === '}') {
+      value = value.slice(1, -1);
+    }
+
+    return value;
+  }
+  return tag.comment.map(x => {
+    let value = x.text;
+    // Unwrap from braces
+    if (value[0] === '{' && value[value.length - 1] === '}') {
+      value = value.slice(1, -1);
+    }
+    return value;
+  }).join('');
 }
 
 interface SupportedJSDocTag extends ts.JSDocTag {
@@ -786,7 +821,7 @@ function traverseInterfaceMembers(
         break;
       default:
         processGenericPropertyType(
-          node, output, property, kind as ts.SyntaxKind, '', options);
+          node, output, property, kind as ts.SyntaxKind, '', sourceFile, options, types);
         break;
     }
   };

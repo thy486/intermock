@@ -117,7 +117,7 @@ function main() {
 
       console.log(result);
     } catch (err) {
-      console.log(err.message);
+      console.log((err as any).message);
     }
   });
 }

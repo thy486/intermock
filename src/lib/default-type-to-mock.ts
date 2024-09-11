@@ -29,7 +29,7 @@ export const defaultTypeToMock: {
   [index: number]: (isFixedMode: boolean) => string | number | boolean | object
 } = {
   [ts.SyntaxKind.NumberKeyword]: (isFixedMode = false) =>
-      parseInt(fake('datatype.number', isFixedMode) as string, 10),
+      parseInt(fake('number.int', isFixedMode) as string, 10),
   [ts.SyntaxKind.StringKeyword]: (isFixedMode = false) =>
       fake('lorem.text', isFixedMode),
   [ts.SyntaxKind.BooleanKeyword]: (isFixedMode = false) =>

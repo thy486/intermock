@@ -14,12 +14,12 @@
  * limitations under the License.
  */
 export const smartProps: {[index: string]: string} = {
-  firstName: 'name.firstName',
-  middleName: 'name.firstName',
-  lastName: 'name.lastName',
-  nickName: 'name.findName',
-  name: 'name.findName',
-  informalName: 'name.findName',
+  firstName: 'person.firstName()',
+  middleName: 'person.middleName()',
+  lastName: 'person.lastName()',
+  nickName: 'person.fullName()',
+  name: 'person.fullName()',
+  informalName: 'person.fullName()',
   phone: 'phone.phoneNumber',
   email: 'internet.email',
   primaryEmail: 'internet.email',
